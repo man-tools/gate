@@ -188,7 +188,7 @@ func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), UserPrinciple, user)
-		r.WithContext(ctx)
+		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
 	})
@@ -202,7 +202,7 @@ func (a *Auth) ProtectRouteUsingToken(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), UserPrinciple, user)
-		r.WithContext(ctx)
+		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
 	})

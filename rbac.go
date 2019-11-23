@@ -178,10 +178,10 @@ func (u *User) fetchRole() ([]Role, error) {
 
 func GetUser(email string) (*User, error) {
 	var user = new(User)
-	getQuery := `SELECT id, email, password, active FROM rbac_user WHERE email = ?`
+	getQuery := `SELECT id, email, username, password, active FROM rbac_user WHERE email = ?`
 
 	result := dbConnection.QueryRow(getQuery, email)
-	err := result.Scan(&user.ID, &user.Email, &user.Password, &user.Active)
+	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -201,10 +201,10 @@ func GetUser(email string) (*User, error) {
 
 func FindUserByUsernameOrEmail(params string) (*User, error) {
 	var user = new(User)
-	getQuery := `SELECT id, email, password, active FROM rbac_user WHERE email = ? OR username = ?`
+	getQuery := `SELECT id, email, username, password, active FROM rbac_user WHERE email = ? OR username = ?`
 
 	result := dbConnection.QueryRow(getQuery, params, params)
-	err := result.Scan(&user.ID, &user.Email, &user.Password, &user.Active)
+	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -227,7 +227,7 @@ func FindUser(params map[string]interface{}) (*User, error) {
 	var result *sql.Row
 	paramsLength := len(params)
 
-	getQuery := `SELECT id, email, password, active FROM rbac_user WHERE `
+	getQuery := `SELECT id, email, username, password, active FROM rbac_user WHERE `
 
 	values := make([]interface{}, 0)
 	index := 0
@@ -240,7 +240,7 @@ func FindUser(params map[string]interface{}) (*User, error) {
 	}
 
 	result = dbConnection.QueryRow(getQuery, values...)
-	err := result.Scan(&user.ID, &user.Email, &user.Password, &user.Active)
+	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
