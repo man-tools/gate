@@ -63,7 +63,7 @@ func (a *Auth) SignInHttp(w http.ResponseWriter, params LoginParams) (*User, err
 		return nil, ErrInvalidUserLogin
 	}
 
-	if compareHash(user.Password, params.Password) {
+	if !compareHash(user.Password, params.Password) {
 		return nil, ErrInvalidPasswordLogin
 	}
 
@@ -109,7 +109,7 @@ func (a *Auth) SignIn(params LoginParams) (*User, string, error) {
 		return nil, "", ErrInvalidUserLogin
 	}
 
-	if compareHash(user.Password, params.Password) {
+	if !compareHash(user.Password, params.Password) {
 		return nil, "", ErrInvalidPasswordLogin
 	}
 
