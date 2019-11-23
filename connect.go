@@ -34,13 +34,20 @@ const (
 type Pager struct {
 	Dialect   string
 	Migration *Migration
+	Auth      *Auth
 }
 
+type SessionOptions struct {
+	LoginMethod      LoginMethod
+	SessionName      string
+	ExpiredInSeconds int64
+}
 type Options struct {
 	DbConnection *sql.DB
 	TokenSource  *redis.Client
 	Dialect      string
 	SchemaName   string
+	Session      SessionOptions
 }
 
 var dbConnection *sql.DB
@@ -60,6 +67,15 @@ func NewConnection(opts *Options) *Pager {
 		log.Fatal(err)
 	}
 
+	// init auth
+	authModule := &Auth{
+		sessionName:      opts.Session.SessionName,
+		expiredInSeconds: opts.Session.ExpiredInSeconds,
+		loginMethod:      opts.Session.LoginMethod,
+		cacheClient:      opts.TokenSource,
+	}
+
 	rbac.Migration = migrator
+	rbac.Auth = authModule
 	return rbac
 }
