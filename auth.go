@@ -6,6 +6,7 @@ import (
 	"github.com/go-redis/redis"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,7 +14,8 @@ var (
 	ErrInvalidPasswordLogin = errors.New("invalid password")
 	ErrInvalidUserLogin     = errors.New("invalid user")
 	ErrCreatingCookie       = errors.New("error while set cookie")
-	ErrInvalidCookie        = errors.New("error invalid cookie")
+	ErrInvalidCookie        = errors.New("invalid cookie")
+	ErrInvalidAuthorization = errors.New("invalid authorization")
 	ErrValidateCookie       = errors.New("error validate cookie")
 	ErrUserNotFound         = errors.New("user not found")
 )
@@ -30,6 +32,8 @@ const (
 	LoginUsername      LoginMethod = 1
 	LoginEmailUsername LoginMethod = 2
 	UserPrinciple      string      = "UserPrinciple"
+	CookieBasedAuth    int         = 0
+	TokenBasedAuth     int         = 1
 )
 
 type Auth struct {
@@ -91,7 +95,7 @@ func (a *Auth) Register(user *User) error {
 	return user.CreateUser()
 }
 
-func (a *Auth) verifyCookie(cookie string) (int64, error) {
+func (a *Auth) verifyToken(cookie string) (int64, error) {
 	result, err := a.cacheClient.Do(
 		"GET",
 		cookie,
@@ -102,13 +106,25 @@ func (a *Auth) verifyCookie(cookie string) (int64, error) {
 	return result, nil
 }
 
-func (a *Auth) GetUserPrinciple(r *http.Request) (*User, error) {
-	cookieData, err := r.Cookie(a.sessionName)
-	if err != nil {
-		return nil, ErrInvalidCookie
+func (a *Auth) GetUserPrinciple(r *http.Request, strategy int) (*User, error) {
+	var token string
+	switch strategy {
+	case CookieBasedAuth:
+		cookieData, err := r.Cookie(a.sessionName)
+		if err != nil {
+			return nil, ErrInvalidCookie
+		}
+		token = cookieData.Value
+	case TokenBasedAuth:
+		rawToken := r.Header.Get("Authorization")
+		headers := strings.Split(rawToken, " ")
+		if len(headers) != 2 {
+			return nil, ErrInvalidAuthorization
+		}
+		token = headers[1]
 	}
 
-	userID, err := a.verifyCookie(cookieData.Value)
+	userID, err := a.verifyToken(token)
 	if err != nil {
 		return nil, ErrValidateCookie
 	}
@@ -125,9 +141,9 @@ func (a *Auth) GetUserPrinciple(r *http.Request) (*User, error) {
 
 func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := a.GetUserPrinciple(r)
+		user, err := a.GetUserPrinciple(r, CookieBasedAuth)
 		if err != nil {
-			w.WriteHeader(http.StatusForbidden)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		ctx := context.WithValue(r.Context(), UserPrinciple, user)
@@ -139,6 +155,32 @@ func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
 
 func (a *Auth) ProtectRouteUsingToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, err := a.GetUserPrinciple(r, TokenBasedAuth)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), UserPrinciple, user)
+		r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *Auth) ProtectWithRBAC(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		ctx := r.Context()
+		user := ctx.Value(UserPrinciple).(*User)
+		if user == nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		if !user.CanAccess(r.Method, r.URL.Path) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 
 		next.ServeHTTP(w, r)
 	})
