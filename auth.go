@@ -89,6 +89,47 @@ func (a *Auth) SignInHttp(w http.ResponseWriter, params LoginParams) (*User, err
 	return user, nil
 }
 
+func (a *Auth) SignIn(params LoginParams) (*User, string, error) {
+	var user *User
+	var err error
+
+	switch a.loginMethod {
+	case LoginEmail:
+		user, err = FindUser(map[string]interface{}{
+			"email": params.Identifier,
+		})
+	case LoginUsername:
+		user, err = FindUser(map[string]interface{}{
+			"username": params.Identifier,
+		})
+	case LoginEmailUsername:
+		user, err = FindUserByUsernameOrEmail(params.Identifier)
+	}
+	if err != nil {
+		return nil, "", ErrInvalidUserLogin
+	}
+
+	if compareHash(user.Password, params.Password) {
+		return nil, "", ErrInvalidPasswordLogin
+	}
+
+	// set cookie
+	token := getRandomHash()
+
+	// save to redis
+	err = a.cacheClient.Do(
+		"SETEX",
+		token,
+		strconv.FormatInt(a.expiredInSeconds, 10),
+		user.ID,
+	).Err()
+	if err != nil {
+		return nil, "", ErrCreatingCookie
+	}
+
+	return user, token, nil
+}
+
 func (a *Auth) Register(user *User) error {
 	passwordHash := hash(user.Password)
 	user.Password = passwordHash
