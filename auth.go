@@ -1,0 +1,145 @@
+package pager
+
+import (
+	"context"
+	"errors"
+	"github.com/go-redis/redis"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+var (
+	ErrInvalidPasswordLogin = errors.New("invalid password")
+	ErrInvalidUserLogin     = errors.New("invalid user")
+	ErrCreatingCookie       = errors.New("error while set cookie")
+	ErrInvalidCookie        = errors.New("error invalid cookie")
+	ErrValidateCookie       = errors.New("error validate cookie")
+	ErrUserNotFound         = errors.New("user not found")
+)
+
+type LoginParams struct {
+	Identifier string
+	Password   string
+}
+
+type LoginMethod int
+
+const (
+	LoginEmail         LoginMethod = 0
+	LoginUsername      LoginMethod = 1
+	LoginEmailUsername LoginMethod = 2
+	UserPrinciple      string      = "UserPrinciple"
+)
+
+type Auth struct {
+	cacheClient      *redis.Client
+	loginMethod      LoginMethod
+	sessionName      string
+	expiredInSeconds int64
+}
+
+func (a *Auth) SignInHttp(w http.ResponseWriter, params LoginParams) (*User, error) {
+	var user *User
+	var err error
+
+	switch a.loginMethod {
+	case LoginEmail:
+		user, err = FindUser(map[string]interface{}{
+			"email": params.Identifier,
+		})
+	case LoginUsername:
+		user, err = FindUser(map[string]interface{}{
+			"username": params.Identifier,
+		})
+	case LoginEmailUsername:
+		user, err = FindUserByUsernameOrEmail(params.Identifier)
+	}
+	if err != nil {
+		return nil, ErrInvalidUserLogin
+	}
+
+	if compareHash(user.Password, params.Password) {
+		return nil, ErrInvalidPasswordLogin
+	}
+
+	// set cookie
+	hashCookie := getRandomHash()
+	http.SetCookie(w, &http.Cookie{
+		Name:    a.sessionName,
+		Value:   hashCookie,
+		Expires: time.Now().Add(time.Duration(a.expiredInSeconds)),
+	})
+
+	// save to redis
+	err = a.cacheClient.Do(
+		"SETEX",
+		hashCookie,
+		strconv.FormatInt(a.expiredInSeconds, 10),
+		user.ID,
+	).Err()
+	if err != nil {
+		return nil, ErrCreatingCookie
+	}
+
+	return user, nil
+}
+
+func (a *Auth) Register(user *User) error {
+	passwordHash := hash(user.Password)
+	user.Password = passwordHash
+	return user.CreateUser()
+}
+
+func (a *Auth) verifyCookie(cookie string) (int64, error) {
+	result, err := a.cacheClient.Do(
+		"GET",
+		cookie,
+	).Int64()
+	if err != nil {
+		return -1, err
+	}
+	return result, nil
+}
+
+func (a *Auth) GetUserPrinciple(r *http.Request) (*User, error) {
+	cookieData, err := r.Cookie(a.sessionName)
+	if err != nil {
+		return nil, ErrInvalidCookie
+	}
+
+	userID, err := a.verifyCookie(cookieData.Value)
+	if err != nil {
+		return nil, ErrValidateCookie
+	}
+
+	user, err := FindUser(map[string]interface{}{
+		"id": userID,
+	})
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+
+	return user, nil
+}
+
+func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, err := a.GetUserPrinciple(r)
+		if err != nil {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		ctx := context.WithValue(r.Context(), UserPrinciple, user)
+		r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *Auth) ProtectRouteUsingToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		next.ServeHTTP(w, r)
+	})
+}
