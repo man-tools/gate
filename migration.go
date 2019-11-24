@@ -23,7 +23,7 @@ var (
 )
 
 type RunMigration interface {
-	Run() error
+	Run(ptx *PagerTx) error
 }
 
 type indexSchema struct {
