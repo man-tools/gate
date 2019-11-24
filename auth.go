@@ -67,7 +67,7 @@ func (a *Auth) authenticate(params LoginParams) (*User, error) {
 		return nil, ErrInvalidUserLogin
 	}
 
-	if !compareHash(loggedUser.Password, params.Password) {
+	if !a.passwordStrategy.ValidatePassword(loggedUser.Password, params.Password) {
 		return nil, ErrInvalidPasswordLogin
 	}
 
@@ -124,8 +124,7 @@ func (a *Auth) SignIn(params LoginParams) (*User, string, error) {
 }
 
 func (a *Auth) Register(user *User) error {
-	passwordHash := hash(user.Password)
-	user.Password = passwordHash
+	user.Password = a.passwordStrategy.HashPassword(user.Password)
 	return user.CreateUser()
 }
 
