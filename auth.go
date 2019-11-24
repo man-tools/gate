@@ -32,10 +32,12 @@ const (
 	LoginEmail         LoginMethod = 0
 	LoginUsername      LoginMethod = 1
 	LoginEmailUsername LoginMethod = 2
-	UserPrinciple      string      = "UserPrinciple"
-	CookieBasedAuth    int         = 0
-	TokenBasedAuth     int         = 1
-	authorization      string      = "Authorization"
+
+	CookieBasedAuth int = 0
+	TokenBasedAuth  int = 1
+
+	authorization string = "Authorization"
+	UserPrinciple string = "UserPrinciple"
 )
 
 type Auth struct {
@@ -43,11 +45,12 @@ type Auth struct {
 	loginMethod      LoginMethod
 	sessionName      string
 	expiredInSeconds int64
+
 	tokenStrategy    TokenGenerator
 	passwordStrategy PasswordStrategy
 }
 
-func (a *Auth) authenticate(params LoginParams) (*User, error) {
+func (a *Auth) Authenticate(params LoginParams) (*User, error) {
 	var loggedUser *User
 	var err error
 
@@ -55,13 +58,13 @@ func (a *Auth) authenticate(params LoginParams) (*User, error) {
 	case LoginEmail:
 		loggedUser, err = FindUser(map[string]interface{}{
 			"email": params.Identifier,
-		})
+		}, nil)
 	case LoginUsername:
 		loggedUser, err = FindUser(map[string]interface{}{
 			"username": params.Identifier,
-		})
+		}, nil)
 	case LoginEmailUsername:
-		loggedUser, err = FindUserByUsernameOrEmail(params.Identifier)
+		loggedUser, err = FindUserByUsernameOrEmail(params.Identifier, nil)
 	}
 	if err != nil {
 		return nil, ErrInvalidUserLogin
@@ -78,7 +81,7 @@ func (a *Auth) authenticate(params LoginParams) (*User, error) {
 }
 
 func (a *Auth) SignInWithCookie(w http.ResponseWriter, params LoginParams) (*User, error) {
-	loggedUser, err := a.authenticate(params)
+	loggedUser, err := a.Authenticate(params)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +107,7 @@ func (a *Auth) SignInWithCookie(w http.ResponseWriter, params LoginParams) (*Use
 }
 
 func (a *Auth) SignIn(params LoginParams) (*User, string, error) {
-	loggedUser, err := a.authenticate(params)
+	loggedUser, err := a.Authenticate(params)
 	if err != nil {
 		return nil, "", err
 	}

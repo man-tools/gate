@@ -13,7 +13,6 @@ func hash(str string) string {
 func compareHash(storedPassword, password string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(password))
 	return err == nil
-
 }
 
 func getRandomHash() string {

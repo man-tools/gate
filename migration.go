@@ -8,20 +8,22 @@ import (
 	"log"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"strings"
 )
 
 const (
-	MYSQL_DIALECT = "mysql"
-
-	DELIMITER_MIGRATION = ";"
+	MYSQLDialect       = "mysql"
+	delimiterMigration = ";"
 )
 
-type MigrationManager interface {
-	InitDBMigration() error
-	ClearMigration()
-	CheckMigration() error
+var (
+	ErrMigrationAlreadyExist = errors.New("error while running migration, migration already exist")
+)
+
+type RunMigration interface {
+	Run() error
 }
 
 type indexSchema struct {
@@ -35,15 +37,17 @@ var existTable = map[string]bool{
 	ROLE_TABLE:            false,
 	ROLE_PERMISSION_TABLE: false,
 	USER_ROLE_TABLE:       false,
+	MIGRATION:             false,
 }
 var indexes = map[string]string{
-	"rbac_user_email_idx":                      "CREATE UNIQUE INDEX rbac_user_email_idx ON rbac_user(email)",
-	"rbac_user_username_idx":                   "CREATE UNIQUE INDEX rbac_user_username_idx ON rbac_user(username)",
-	"rbac_permission_route_method_idx":         "CREATE INDEX rbac_permission_route_method_idx ON rbac_permission(route, method)",
-	"rbac_permission_name_idx":                 "CREATE UNIQUE INDEX rbac_permission_name_idx ON rbac_permission(name)",
-	"rbac_role_name_idx":                       "CREATE UNIQUE INDEX rbac_role_name_idx ON rbac_role(name)",
+	"rbac_user_email_idx":                      "CREATE UNIQUE INDEX `rbac_user_email_idx` ON rbac_user(email)",
+	"rbac_user_username_idx":                   "CREATE UNIQUE INDEX `rbac_user_username_idx` ON rbac_user(username)",
+	"rbac_permission_route_method_idx":         "CREATE UNIQUE INDEX `rbac_permission_route_method_idx` ON rbac_permission(route, method)",
+	"rbac_permission_name_idx":                 "CREATE UNIQUE INDEX `rbac_permission_name_idx` ON rbac_permission(name)",
+	"rbac_role_name_idx":                       "CREATE UNIQUE INDEX `rbac_role_name_idx` ON rbac_role(name)",
 	"rbac_user_role_role_user_idx":             "CREATE UNIQUE INDEX `rbac_user_role_role_user_idx` on rbac_user_role (role_id, user_id)",
 	"rbac_role_permission_role_permission_idx": "CREATE UNIQUE INDEX `rbac_role_permission_role_permission_idx` on rbac_role_permission (role_id, permission_id)",
+	"rbac_migration_key_idx":                   "CREATE UNIQUE INDEX `rbac_migration_key_idx` on rbac_migration (migration_key)",
 }
 
 type defaultMigrationConfig struct {
@@ -64,7 +68,7 @@ type MigrationOptions struct {
 }
 
 var queryCollection = map[string]defaultMigrationConfig{
-	MYSQL_DIALECT: {
+	MYSQLDialect: {
 		migrationPath:       MYSQL_MIGRATION_PATH,
 		revertMigrationPath: REVERT_MYSQL_MIGRATION_PATH,
 	},
@@ -90,7 +94,7 @@ func (m *Migration) InitDBMigration() error {
 		return errors.New(fmt.Sprintf(ErrMigration, "failed to open migration file"))
 	}
 
-	sliceQuery := strings.Split(rawMigrationQuery, DELIMITER_MIGRATION)
+	sliceQuery := strings.Split(rawMigrationQuery, delimiterMigration)
 	for i := range sliceQuery {
 		if len(strings.TrimSpace(sliceQuery[i])) == 0 {
 			continue
@@ -115,7 +119,7 @@ func (m *Migration) ClearMigration() {
 	fmt.Println("clear rbac-db")
 	rawMigrationQuery, _ := openMigration(fmt.Sprintf("%s/migration/%s", getCurrentPath(), REVERT_MYSQL_MIGRATION_PATH))
 
-	sliceQuery := strings.Split(rawMigrationQuery, DELIMITER_MIGRATION)
+	sliceQuery := strings.Split(rawMigrationQuery, delimiterMigration)
 	for i := range sliceQuery {
 		if len(strings.TrimSpace(sliceQuery[i])) == 0 {
 			continue
@@ -153,6 +157,28 @@ func (m *Migration) CheckMigration() error {
 			return errors.New(fmt.Sprintf(ErrMigration, "table doesn't exist"))
 		}
 	}
+	return nil
+}
+
+func (m *Migration) Run(migration RunMigration) error {
+	var err error
+	ptx := &PagerTx{}
+
+	err = ptx.BeginTx()
+	if err != nil {
+		return err
+	}
+	defer ptx.FinishTx(err)
+
+	alreadyRun, err := checkExistMigration(ptx, reflect.TypeOf(migration).String())
+	if err != nil {
+		return err
+	}
+	if alreadyRun {
+		err = ErrMigrationAlreadyExist
+		return ErrMigrationAlreadyExist
+	}
+	err = migration.Run()
 	return nil
 }
 

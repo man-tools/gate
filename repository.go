@@ -1,6 +1,7 @@
 package pager
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,7 +12,19 @@ var (
 	ErrInvalidUserID       = errors.New("invalid user id")
 	ErrInvalidPermissionID = errors.New("invalid permission id")
 	ErrInvalidRoleID       = errors.New("invalid role id")
+	ErrTxWithNoBegin       = errors.New("error dbTx without begin()")
 )
+
+type dbContract interface {
+	Prepare(query string) (*sql.Stmt, error)
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
 
 // User Repository
 type User struct {
@@ -21,19 +34,25 @@ type User struct {
 	Password string `db:"password" json:"-"`
 	Active   bool   `db:"active" json:"active"`
 	Roles    []Role `db:"-"`
+	db       dbContract
 }
 
 func (u *User) CreateUser() error {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	insertQuery := `INSERT INTO rbac_user (
 		email, 
 		username,
 		password) VALUES (?,?,?)`
-	result, err := dbConnection.Exec(
+
+	result, err := u.db.Exec(
 		insertQuery,
 		u.Email,
 		u.Username,
 		u.Password,
 	)
+
 	if err != nil {
 		return err
 	}
@@ -44,6 +63,9 @@ func (u *User) CreateUser() error {
 }
 
 func (u *User) Save() error {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	saveQuery := `INSERT INTO rbac_user (
 		email,
 		username,
@@ -51,7 +73,7 @@ func (u *User) Save() error {
 		active
 	) VALUES(?, ?, ?, ?) ON DUPLICATE KEY UPDATE email = ?, username = ?, password = ?, active = ?`
 
-	result, err := dbConnection.Exec(
+	result, err := u.db.Exec(
 		saveQuery,
 		u.Email,
 		u.Username,
@@ -71,13 +93,16 @@ func (u *User) Save() error {
 }
 
 func (u *User) Delete() error {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	if u.ID <= 0 {
 		return ErrInvalidUserID
 	}
 
 	deleteQuery := `DELETE FROM rbac_user WHERE id = ?`
 
-	_, err := dbConnection.Exec(
+	_, err := u.db.Exec(
 		deleteQuery,
 		u.ID,
 	)
@@ -88,6 +113,9 @@ func (u *User) Delete() error {
 }
 
 func (u *User) CanAccess(method, path string) bool {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	getQuery := `SELECT 
 		COUNT(1) as count
 	FROM rbac_user_role ur 
@@ -99,7 +127,7 @@ func (u *User) CanAccess(method, path string) bool {
 		count int64 `db:"count"`
 	}{}
 
-	result := dbConnection.QueryRow(getQuery, u.ID, method, path)
+	result := u.db.QueryRow(getQuery, u.ID, method, path)
 	err := result.Scan(&rowData.count)
 	if err != nil {
 		return false
@@ -108,6 +136,9 @@ func (u *User) CanAccess(method, path string) bool {
 }
 
 func (u *User) HasPermission(permissionName string) bool {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	getQuery := `SELECT 
 		COUNT(1) as count
 	FROM rbac_user_role ur 
@@ -119,7 +150,7 @@ func (u *User) HasPermission(permissionName string) bool {
 		count int64 `db:"count"`
 	}{}
 
-	result := dbConnection.QueryRow(getQuery, u.ID, permissionName)
+	result := u.db.QueryRow(getQuery, u.ID, permissionName)
 	err := result.Scan(&rowData.count)
 	if err != nil {
 		return false
@@ -128,6 +159,9 @@ func (u *User) HasPermission(permissionName string) bool {
 }
 
 func (u *User) HasRole(roleName string) bool {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	getQuery := `SELECT 
 		COUNT(1) as count
 	FROM rbac_user_role ur 
@@ -138,7 +172,7 @@ func (u *User) HasRole(roleName string) bool {
 		count int64 `db:"count"`
 	}{}
 
-	result := dbConnection.QueryRow(getQuery, u.ID, roleName)
+	result := u.db.QueryRow(getQuery, u.ID, roleName)
 	err := result.Scan(&rowData.count)
 	if err != nil {
 		return false
@@ -147,6 +181,9 @@ func (u *User) HasRole(roleName string) bool {
 }
 
 func (u *User) fetchRole() ([]Role, error) {
+	if u.db == nil {
+		u.db = dbConnection
+	}
 	var roles []Role
 	getQuery := `SELECT
 		r.id,
@@ -158,7 +195,7 @@ func (u *User) fetchRole() ([]Role, error) {
 	JOIN rbac_role r WHERE ur.user_id = ?`
 
 	roles = make([]Role, 0)
-	result, err := dbConnection.Query(getQuery, u.ID)
+	result, err := u.db.Query(getQuery, u.ID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return roles, nil
@@ -176,11 +213,21 @@ func (u *User) fetchRole() ([]Role, error) {
 	return roles, nil
 }
 
-func GetUser(email string) (*User, error) {
+func GetUser(email string, ptx *PagerTx) (*User, error) {
+	var db dbContract
+	if ptx == nil {
+		db = dbConnection
+	} else {
+		if ptx.dbTx == nil {
+			return nil, ErrTxWithNoBegin
+		}
+		db = ptx.dbTx
+	}
+
 	var user = new(User)
 	getQuery := `SELECT id, email, username, password, active FROM rbac_user WHERE email = ?`
 
-	result := dbConnection.QueryRow(getQuery, email)
+	result := db.QueryRow(getQuery, email)
 	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -199,11 +246,21 @@ func GetUser(email string) (*User, error) {
 	return user, nil
 }
 
-func FindUserByUsernameOrEmail(params string) (*User, error) {
+func FindUserByUsernameOrEmail(params string, ptx *PagerTx) (*User, error) {
+	var db dbContract
+	if ptx == nil {
+		db = dbConnection
+	} else {
+		if ptx.dbTx == nil {
+			return nil, ErrTxWithNoBegin
+		}
+		db = ptx.dbTx
+	}
+
 	var user = new(User)
 	getQuery := `SELECT id, email, username, password, active FROM rbac_user WHERE email = ? OR username = ?`
 
-	result := dbConnection.QueryRow(getQuery, params, params)
+	result := db.QueryRow(getQuery, params, params)
 	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -222,7 +279,16 @@ func FindUserByUsernameOrEmail(params string) (*User, error) {
 	return user, nil
 }
 
-func FindUser(params map[string]interface{}) (*User, error) {
+func FindUser(params map[string]interface{}, ptx *PagerTx) (*User, error) {
+	var db dbContract
+	if ptx == nil {
+		db = dbConnection
+	} else {
+		if ptx.dbTx == nil {
+			return nil, ErrTxWithNoBegin
+		}
+		db = ptx.dbTx
+	}
 	var user = new(User)
 	var result *sql.Row
 	paramsLength := len(params)
@@ -234,12 +300,12 @@ func FindUser(params map[string]interface{}) (*User, error) {
 	for k := range params {
 		getQuery += fmt.Sprintf("%s = ?", k)
 		if index < paramsLength-1 {
-			getQuery += `,`
+			getQuery += ` AND `
 		}
 		values = append(values, params[k])
 	}
 
-	result = dbConnection.QueryRow(getQuery, values...)
+	result = db.QueryRow(getQuery, values...)
 	err := result.Scan(&user.ID, &user.Email, &user.Username, &user.Password, &user.Active)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -267,13 +333,18 @@ type Role struct {
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 	Permission  []Permission
+	db          dbContract
 }
 
 func (r *Role) CreateRole() error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
+
 	insertQuery := `INSERT INTO rbac_role (
 		name, 
 		description) VALUES (?,?)`
-	result, err := dbConnection.Exec(
+	result, err := r.db.Exec(
 		insertQuery,
 		r.Name,
 		r.Description,
@@ -287,11 +358,15 @@ func (r *Role) CreateRole() error {
 }
 
 func (r *Role) DeleteRole() error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
+
 	if r.ID <= 0 {
 		return ErrInvalidRoleID
 	}
 	deleteQuery := `DELETE FROM rbac_role WHERE id = ?`
-	_, err := dbConnection.Exec(
+	_, err := r.db.Exec(
 		deleteQuery,
 		r.ID,
 	)
@@ -302,6 +377,9 @@ func (r *Role) DeleteRole() error {
 }
 
 func (r *Role) Assign(u *User) error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
 	if r.ID <= 0 {
 		return ErrInvalidRoleID
 	}
@@ -314,7 +392,7 @@ func (r *Role) Assign(u *User) error {
 		role_id, 
 		user_id
 	) VALUES (?,?)`
-	_, err := dbConnection.Exec(
+	_, err := r.db.Exec(
 		insertQuery,
 		r.ID,
 		u.ID,
@@ -328,6 +406,10 @@ func (r *Role) Assign(u *User) error {
 }
 
 func (r *Role) Revoke(u *User) error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
+
 	if r.ID <= 0 {
 		return ErrInvalidRoleID
 	}
@@ -337,7 +419,7 @@ func (r *Role) Revoke(u *User) error {
 	}
 
 	revokeQuery := `DELETE FROM rbac_user_role WHERE role_id = ? AND user_id = ?`
-	_, err := dbConnection.Exec(
+	_, err := r.db.Exec(
 		revokeQuery,
 		r.ID,
 		u.ID,
@@ -356,6 +438,10 @@ func (r *Role) Revoke(u *User) error {
 }
 
 func (r *Role) AddChild(p *Permission) error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
+
 	if r.ID <= 0 {
 		return ErrInvalidRoleID
 	}
@@ -368,7 +454,7 @@ func (r *Role) AddChild(p *Permission) error {
 		role_id, 
 		permission_id
 	) VALUES (?,?)`
-	_, err := dbConnection.Exec(
+	_, err := r.db.Exec(
 		insertQuery,
 		r.ID,
 		p.ID,
@@ -381,6 +467,10 @@ func (r *Role) AddChild(p *Permission) error {
 }
 
 func (r *Role) RemoveChild(p *Permission) error {
+	if r.db == nil {
+		r.db = dbConnection
+	}
+
 	if r.ID <= 0 {
 		return ErrInvalidRoleID
 	}
@@ -390,7 +480,7 @@ func (r *Role) RemoveChild(p *Permission) error {
 	}
 
 	revokeQuery := `DELETE FROM rbac_role_permission WHERE role_id = ? AND permission_id = ?`
-	_, err := dbConnection.Exec(
+	_, err := r.db.Exec(
 		revokeQuery,
 		r.ID,
 		p.ID,
@@ -408,7 +498,16 @@ func (r *Role) RemoveChild(p *Permission) error {
 	return nil
 }
 
-func GetRole(name string) (*Role, error) {
+func GetRole(name string, ptx *PagerTx) (*Role, error) {
+	var db dbContract
+	if ptx == nil {
+		db = dbConnection
+	} else {
+		if ptx.dbTx == nil {
+			return nil, ErrTxWithNoBegin
+		}
+		db = ptx.dbTx
+	}
 	var role = new(Role)
 	getQuery := `SELECT
 		id,
@@ -418,7 +517,7 @@ func GetRole(name string) (*Role, error) {
 		updated_at
 	FROM rbac_role WHERE name = ?`
 
-	result := dbConnection.QueryRow(getQuery, name)
+	result := db.QueryRow(getQuery, name)
 	err := result.Scan(&role.ID, &role.Name, &role.Description, &role.CreatedAt, &role.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -459,15 +558,19 @@ type Permission struct {
 	Description string    `db:"description"`
 	CreatedAt   time.Time `db:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at"`
+	db          dbContract
 }
 
 func (p *Permission) CreatePermission() error {
+	if p.db == nil {
+		p.db = dbConnection
+	}
 	insertQuery := `INSERT INTO rbac_permission (
 		name, 
 		method,
 		route,
 		description) VALUES (?,?,?,?)`
-	result, err := dbConnection.Exec(
+	result, err := p.db.Exec(
 		insertQuery,
 		p.Name,
 		p.Method,
@@ -483,11 +586,14 @@ func (p *Permission) CreatePermission() error {
 }
 
 func (p *Permission) DeletePermission() error {
+	if p.db == nil {
+		p.db = dbConnection
+	}
 	if p.ID <= 0 {
 		return ErrInvalidPermissionID
 	}
 	deleteQuery := `DELETE FROM rbac_permission WHERE id = ?`
-	_, err := dbConnection.Exec(
+	_, err := p.db.Exec(
 		deleteQuery,
 		p.ID,
 	)
@@ -497,7 +603,17 @@ func (p *Permission) DeletePermission() error {
 	return nil
 }
 
-func GetPermission(name string) (*Permission, error) {
+func GetPermission(name string, ptx *PagerTx) (*Permission, error) {
+	var db dbContract
+	if ptx == nil {
+		db = dbConnection
+	} else {
+		if ptx.dbTx == nil {
+			return nil, ErrTxWithNoBegin
+		}
+		db = ptx.dbTx
+	}
+
 	var permission = new(Permission)
 	getQuery := `SELECT
 		id,
@@ -509,7 +625,7 @@ func GetPermission(name string) (*Permission, error) {
 		updated_at
 	FROM rbac_permission WHERE name = ?`
 
-	result := dbConnection.QueryRow(getQuery, name)
+	result := db.QueryRow(getQuery, name)
 	err := result.Scan(&permission.ID, &permission.Name, &permission.Method, &permission.Route, &permission.Description, &permission.CreatedAt, &permission.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -518,4 +634,30 @@ func GetPermission(name string) (*Permission, error) {
 		return nil, err
 	}
 	return permission, nil
+}
+
+// Migration Repository
+func checkExistMigration(ptx *PagerTx, migrationType string) (bool, error) {
+	rawResult := struct{
+		MigrationKey string `db:"migration_key"`
+	}{}
+	selectQuery := `SELECT migration_key FROM rbac_migration WHERE migration_key = ? LIMIT 1`
+	result := ptx.dbTx.QueryRow(selectQuery, migrationType)
+	err := result.Scan(&rawResult)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func insertMigration(ptx *PagerTx, migrationType string) error {
+	insertQuery := `INSERT INTO rbac_migration(migration_key) VALUES (?)`
+	_, err := ptx.dbTx.Exec(
+		insertQuery,
+		migrationType,
+	)
+	return err
 }

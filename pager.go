@@ -29,6 +29,7 @@ const (
 	ROLE_TABLE            = "rbac_role"
 	ROLE_PERMISSION_TABLE = "rbac_role_permission"
 	USER_ROLE_TABLE       = "rbac_user_role"
+	MIGRATION             = "rbac_migration"
 )
 
 type Pager struct {
