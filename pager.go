@@ -59,41 +59,53 @@ func setDatabaseConnection(db *sql.DB) {
 	mutexDbLock.Unlock()
 }
 
-func NewConnection(opts *Options) *Pager {
+type pagerBuilder struct {
+	pagerOptions     *Options
+	tokenStrategy    TokenGenerator
+	passwordStrategy PasswordStrategy
+}
+
+func NewPager(opts *Options) *pagerBuilder {
+	rbacBuilder := &pagerBuilder{
+		pagerOptions: opts,
+	}
+	defaultTokenGen := &DefaultTokenGenerator{}
+	defaultPasswordStrategy := &DefaultBcryptPasswordStrategy{}
+	rbacBuilder.tokenStrategy = defaultTokenGen
+	rbacBuilder.passwordStrategy = defaultPasswordStrategy
+	return rbacBuilder
+}
+
+func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) {
+	p.tokenStrategy = generator
+}
+
+func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordStrategy) {
+	p.passwordStrategy = strategy
+}
+
+func (p *pagerBuilder) BuildPager() *Pager {
 	rbac := &Pager{}
-
-	setDatabaseConnection(opts.DbConnection)
-
 	migrator, err := NewMigration(MigrationOptions{
-		dialect: opts.Dialect,
-		schema:  opts.SchemaName,
+		dialect: p.pagerOptions.Dialect,
+		schema:  p.pagerOptions.SchemaName,
 	})
+	setDatabaseConnection(p.pagerOptions.DbConnection)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	defaultTokenGen := &DefaultTokenGenerator{}
-	defaultPasswordStrategy := &DefaultBcryptPasswordStrategy{}
-
 	authModule := &Auth{
-		sessionName:      opts.Session.SessionName,
-		expiredInSeconds: opts.Session.ExpiredInSeconds,
-		loginMethod:      opts.Session.LoginMethod,
-		cacheClient:      opts.CacheClient,
-		tokenStrategy:    defaultTokenGen,
-		passwordStrategy: defaultPasswordStrategy,
+		sessionName:      p.pagerOptions.Session.SessionName,
+		expiredInSeconds: p.pagerOptions.Session.ExpiredInSeconds,
+		loginMethod:      p.pagerOptions.Session.LoginMethod,
+		cacheClient:      p.pagerOptions.CacheClient,
+		tokenStrategy:    p.tokenStrategy,
+		passwordStrategy: p.passwordStrategy,
 	}
 
 	rbac.Migration = migrator
 	rbac.Auth = authModule
 	return rbac
-}
-
-func (p *Pager) SetTokenGenerator(generator TokenGenerator) {
-	p.Auth.tokenStrategy = generator
-}
-
-func (p *Pager) SetPasswordStrategy(strategy PasswordStrategy) {
-	p.Auth.passwordStrategy = strategy
 }
