@@ -178,7 +178,7 @@ func (m *Migration) Run(migration RunMigration) error {
 		err = ErrMigrationAlreadyExist
 		return ErrMigrationAlreadyExist
 	}
-	err = migration.Run()
+	err = migration.Run(ptx)
 	return nil
 }
 
