@@ -76,11 +76,11 @@ func NewPager(opts *Options) *pagerBuilder {
 	return rbacBuilder
 }
 
-func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) {
+func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) *pagerBuilder {
 	p.tokenStrategy = generator
 }
 
-func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordStrategy) {
+func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordStrategy) *pagerBuilder {
 	p.passwordStrategy = strategy
 }
 
