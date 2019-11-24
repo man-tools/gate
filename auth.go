@@ -212,7 +212,7 @@ func (a *Auth) getUserPrinciple(r *http.Request, strategy int) (*User, error) {
 
 	user, err := FindUser(map[string]interface{}{
 		"id": userID,
-	})
+	}, nil)
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
