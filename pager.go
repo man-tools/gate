@@ -4,11 +4,11 @@ import (
 	"database/sql"
 	"github.com/go-redis/redis"
 	"log"
+	"sync"
 )
 
-// Connection interface is an abstraction for connecting db
-type Connection interface {
-	ConnectDatabase(connectionString string)
+type AuthManager interface {
+	GenerateToken()
 }
 
 // Constants for Error Messaging
@@ -44,20 +44,26 @@ type SessionOptions struct {
 }
 type Options struct {
 	DbConnection *sql.DB
-	TokenSource  *redis.Client
+	CacheClient  *redis.Client
 	Dialect      string
 	SchemaName   string
 	Session      SessionOptions
 }
 
 var dbConnection *sql.DB
+var mutexDbLock = &sync.Mutex{}
+
+func setDatabaseConnection(db *sql.DB) {
+	mutexDbLock.Lock()
+	dbConnection = db
+	mutexDbLock.Unlock()
+}
 
 func NewConnection(opts *Options) *Pager {
 	rbac := &Pager{}
 
-	dbConnection = opts.DbConnection
+	setDatabaseConnection(opts.DbConnection)
 
-	// init migration
 	migrator, err := NewMigration(MigrationOptions{
 		dialect: opts.Dialect,
 		schema:  opts.SchemaName,
@@ -67,15 +73,27 @@ func NewConnection(opts *Options) *Pager {
 		log.Fatal(err)
 	}
 
-	// init auth
+	defaultTokenGen := &DefaultTokenGenerator{}
+	defaultPasswordStrategy := &DefaultBcryptPasswordStrategy{}
+
 	authModule := &Auth{
 		sessionName:      opts.Session.SessionName,
 		expiredInSeconds: opts.Session.ExpiredInSeconds,
 		loginMethod:      opts.Session.LoginMethod,
-		cacheClient:      opts.TokenSource,
+		cacheClient:      opts.CacheClient,
+		tokenStrategy:    defaultTokenGen,
+		passwordStrategy: defaultPasswordStrategy,
 	}
 
 	rbac.Migration = migrator
 	rbac.Auth = authModule
 	return rbac
+}
+
+func (p *Pager) SetTokenGenerator(generator TokenGenerator) {
+	p.Auth.tokenStrategy = generator
+}
+
+func (p *Pager) SetPasswordStrategy(strategy PasswordStrategy) {
+	p.Auth.passwordStrategy = strategy
 }

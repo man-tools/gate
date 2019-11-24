@@ -18,6 +18,7 @@ var (
 	ErrInvalidAuthorization = errors.New("invalid authorization")
 	ErrValidateCookie       = errors.New("error validate cookie")
 	ErrUserNotFound         = errors.New("user not found")
+	ErrUserNotActive        = errors.New("user is not active")
 )
 
 type LoginParams struct {
@@ -34,6 +35,7 @@ const (
 	UserPrinciple      string      = "UserPrinciple"
 	CookieBasedAuth    int         = 0
 	TokenBasedAuth     int         = 1
+	authorization      string      = "Authorization"
 )
 
 type Auth struct {
@@ -41,99 +43,135 @@ type Auth struct {
 	loginMethod      LoginMethod
 	sessionName      string
 	expiredInSeconds int64
+	tokenStrategy    TokenGenerator
+	passwordStrategy PasswordStrategy
 }
 
-func (a *Auth) SignInHttp(w http.ResponseWriter, params LoginParams) (*User, error) {
-	var user *User
+func (a *Auth) authenticate(params LoginParams) (*User, error) {
+	var loggedUser *User
 	var err error
 
 	switch a.loginMethod {
 	case LoginEmail:
-		user, err = FindUser(map[string]interface{}{
+		loggedUser, err = FindUser(map[string]interface{}{
 			"email": params.Identifier,
 		})
 	case LoginUsername:
-		user, err = FindUser(map[string]interface{}{
+		loggedUser, err = FindUser(map[string]interface{}{
 			"username": params.Identifier,
 		})
 	case LoginEmailUsername:
-		user, err = FindUserByUsernameOrEmail(params.Identifier)
+		loggedUser, err = FindUserByUsernameOrEmail(params.Identifier)
 	}
 	if err != nil {
 		return nil, ErrInvalidUserLogin
 	}
 
-	if !compareHash(user.Password, params.Password) {
+	if !compareHash(loggedUser.Password, params.Password) {
 		return nil, ErrInvalidPasswordLogin
 	}
 
-	// set cookie
-	hashCookie := getRandomHash()
+	if !loggedUser.Active {
+		return nil, ErrUserNotActive
+	}
+	return loggedUser, nil
+}
+
+func (a *Auth) SignInWithCookie(w http.ResponseWriter, params LoginParams) (*User, error) {
+	loggedUser, err := a.authenticate(params)
+	if err != nil {
+		return nil, err
+	}
+
+	hashCookie := a.tokenStrategy.GenerateToken()
 	http.SetCookie(w, &http.Cookie{
 		Name:    a.sessionName,
 		Value:   hashCookie,
 		Expires: time.Now().Add(time.Duration(a.expiredInSeconds)),
 	})
 
-	// save to redis
 	err = a.cacheClient.Do(
 		"SETEX",
 		hashCookie,
 		strconv.FormatInt(a.expiredInSeconds, 10),
-		user.ID,
+		loggedUser.ID,
 	).Err()
 	if err != nil {
 		return nil, ErrCreatingCookie
 	}
 
-	return user, nil
+	return loggedUser, nil
 }
 
 func (a *Auth) SignIn(params LoginParams) (*User, string, error) {
-	var user *User
-	var err error
-
-	switch a.loginMethod {
-	case LoginEmail:
-		user, err = FindUser(map[string]interface{}{
-			"email": params.Identifier,
-		})
-	case LoginUsername:
-		user, err = FindUser(map[string]interface{}{
-			"username": params.Identifier,
-		})
-	case LoginEmailUsername:
-		user, err = FindUserByUsernameOrEmail(params.Identifier)
-	}
+	loggedUser, err := a.authenticate(params)
 	if err != nil {
-		return nil, "", ErrInvalidUserLogin
+		return nil, "", err
 	}
 
-	if !compareHash(user.Password, params.Password) {
-		return nil, "", ErrInvalidPasswordLogin
-	}
-
-	// set cookie
-	token := getRandomHash()
-
-	// save to redis
+	token := a.tokenStrategy.GenerateToken()
 	err = a.cacheClient.Do(
 		"SETEX",
 		token,
 		strconv.FormatInt(a.expiredInSeconds, 10),
-		user.ID,
+		loggedUser.ID,
 	).Err()
 	if err != nil {
 		return nil, "", ErrCreatingCookie
 	}
 
-	return user, token, nil
+	return loggedUser, token, nil
 }
 
 func (a *Auth) Register(user *User) error {
 	passwordHash := hash(user.Password)
 	user.Password = passwordHash
 	return user.CreateUser()
+}
+
+func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, err := a.getUserPrinciple(r, CookieBasedAuth)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), UserPrinciple, user)
+		r = r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *Auth) ProtectRouteUsingToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, err := a.getUserPrinciple(r, TokenBasedAuth)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), UserPrinciple, user)
+		r = r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *Auth) ProtectWithRBAC(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserLogin(r)
+		if user == nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		if !user.CanAccess(r.Method, r.URL.Path) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *Auth) verifyToken(cookie string) (int64, error) {
@@ -147,7 +185,7 @@ func (a *Auth) verifyToken(cookie string) (int64, error) {
 	return result, nil
 }
 
-func (a *Auth) GetUserPrinciple(r *http.Request, strategy int) (*User, error) {
+func (a *Auth) getUserPrinciple(r *http.Request, strategy int) (*User, error) {
 	var token string
 	switch strategy {
 	case CookieBasedAuth:
@@ -157,7 +195,7 @@ func (a *Auth) GetUserPrinciple(r *http.Request, strategy int) (*User, error) {
 		}
 		token = cookieData.Value
 	case TokenBasedAuth:
-		rawToken := r.Header.Get("Authorization")
+		rawToken := r.Header.Get(authorization)
 		headers := strings.Split(rawToken, " ")
 		if len(headers) != 2 {
 			return nil, ErrInvalidAuthorization
@@ -180,49 +218,7 @@ func (a *Auth) GetUserPrinciple(r *http.Request, strategy int) (*User, error) {
 	return user, nil
 }
 
-func (a *Auth) ProtectRoute(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := a.GetUserPrinciple(r, CookieBasedAuth)
-		if err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		ctx := context.WithValue(r.Context(), UserPrinciple, user)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (a *Auth) ProtectRouteUsingToken(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := a.GetUserPrinciple(r, TokenBasedAuth)
-		if err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		ctx := context.WithValue(r.Context(), UserPrinciple, user)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (a *Auth) ProtectWithRBAC(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		ctx := r.Context()
-		user := ctx.Value(UserPrinciple).(*User)
-		if user == nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-
-		if !user.CanAccess(r.Method, r.URL.Path) {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+func GetUserLogin(r *http.Request) *User {
+	ctx := r.Context()
+	return ctx.Value(UserPrinciple).(*User)
 }
