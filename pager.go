@@ -78,10 +78,12 @@ func NewPager(opts *Options) *pagerBuilder {
 
 func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) *pagerBuilder {
 	p.tokenStrategy = generator
+	return p
 }
 
 func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordStrategy) *pagerBuilder {
 	p.passwordStrategy = strategy
+	return p
 }
 
 func (p *pagerBuilder) BuildPager() *Pager {
