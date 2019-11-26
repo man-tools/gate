@@ -170,7 +170,8 @@ func (m *Migration) Run(migration RunMigration) error {
 	}
 	defer ptx.FinishTx(err)
 
-	alreadyRun, err := checkExistMigration(ptx, reflect.TypeOf(migration).String())
+	migrationName := reflect.TypeOf(migration).String()
+	alreadyRun, err := checkExistMigration(ptx, migrationName)
 	if err != nil {
 		return err
 	}

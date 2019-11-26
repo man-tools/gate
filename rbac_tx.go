@@ -34,7 +34,9 @@ func (ptx *PagerTx) FinishTx(err error) error {
 	if err == nil {
 		return ptx.dbTx.Commit()
 	}
-	if err != ErrMigrationAlreadyExist {
+	if err == ErrMigrationAlreadyExist {
+		log.Println("migration already exist")
+	} else {
 		log.Fatal("failed to run migration, err = ", err)
 	}
 
