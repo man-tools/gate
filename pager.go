@@ -63,7 +63,7 @@ func setDatabaseConnection(db *sql.DB) {
 type pagerBuilder struct {
 	pagerOptions     *Options
 	tokenStrategy    TokenGenerator
-	passwordStrategy PasswordStrategy
+	passwordStrategy PasswordGenerator
 }
 
 func NewPager(opts *Options) *pagerBuilder {
@@ -71,7 +71,7 @@ func NewPager(opts *Options) *pagerBuilder {
 		pagerOptions: opts,
 	}
 	defaultTokenGen := &DefaultTokenGenerator{}
-	defaultPasswordStrategy := &DefaultBcryptPasswordStrategy{}
+	defaultPasswordStrategy := &DefaultBcryptPassword{}
 	rbacBuilder.tokenStrategy = defaultTokenGen
 	rbacBuilder.passwordStrategy = defaultPasswordStrategy
 	return rbacBuilder
@@ -82,23 +82,13 @@ func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) *pagerBuilder
 	return p
 }
 
-func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordStrategy) *pagerBuilder {
+func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordGenerator) *pagerBuilder {
 	p.passwordStrategy = strategy
 	return p
 }
 
 func (p *pagerBuilder) BuildPager() *Pager {
 	rbac := &Pager{}
-	migrator, err := NewMigration(MigrationOptions{
-		dialect: p.pagerOptions.Dialect,
-		schema:  p.pagerOptions.SchemaName,
-	})
-	setDatabaseConnection(p.pagerOptions.DbConnection)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	authModule := &Auth{
 		sessionName:      p.pagerOptions.Session.SessionName,
 		expiredInSeconds: p.pagerOptions.Session.ExpiredInSeconds,
@@ -106,6 +96,16 @@ func (p *pagerBuilder) BuildPager() *Pager {
 		cacheClient:      p.pagerOptions.CacheClient,
 		tokenStrategy:    p.tokenStrategy,
 		passwordStrategy: p.passwordStrategy,
+	}
+	migrator, err := NewMigration(MigrationOptions{
+		dialect: p.pagerOptions.Dialect,
+		schema:  p.pagerOptions.SchemaName,
+		auth:    authModule,
+	})
+	setDatabaseConnection(p.pagerOptions.DbConnection)
+
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	rbac.Migration = migrator

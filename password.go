@@ -1,16 +1,16 @@
 package pager
 
-type PasswordStrategy interface {
+type PasswordGenerator interface {
 	HashPassword(password string) string
 	ValidatePassword(storedPassword, password string) bool
 }
 
-type DefaultBcryptPasswordStrategy struct{}
+type DefaultBcryptPassword struct{}
 
-func (d *DefaultBcryptPasswordStrategy) HashPassword(password string) string {
+func (d *DefaultBcryptPassword) HashPassword(password string) string {
 	return hash(password)
 }
 
-func (d *DefaultBcryptPasswordStrategy) ValidatePassword(storedPassword, password string) bool {
+func (d *DefaultBcryptPassword) ValidatePassword(storedPassword, password string) bool {
 	return compareHash(storedPassword, password)
 }

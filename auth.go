@@ -47,7 +47,7 @@ type Auth struct {
 	expiredInSeconds int64
 
 	tokenStrategy    TokenGenerator
-	passwordStrategy PasswordStrategy
+	passwordStrategy PasswordGenerator
 }
 
 func (a *Auth) Authenticate(params LoginParams) (*User, error) {
