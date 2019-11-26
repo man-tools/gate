@@ -170,7 +170,7 @@ func (m *Migration) Run(migration RunMigration) error {
 	}
 	defer ptx.FinishTx(err)
 
-	migrationName := reflect.TypeOf(migration).String()
+	migrationName := reflect.TypeOf(migration).Name()
 	alreadyRun, err := checkExistMigration(ptx, migrationName)
 	if err != nil {
 		return err
@@ -180,7 +180,13 @@ func (m *Migration) Run(migration RunMigration) error {
 		return ErrMigrationAlreadyExist
 	}
 	err = migration.Run(ptx)
-	return nil
+	if err != nil {
+		errRecordMigration := insertMigration(ptx, migrationName)
+		if errRecordMigration != nil {
+			return errRecordMigration
+		}
+	}
+	return err
 }
 
 func (m *Migration) migrateIndexes() error {
