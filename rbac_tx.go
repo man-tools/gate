@@ -1,6 +1,9 @@
 package pager
 
-import "database/sql"
+import (
+	"database/sql"
+	"log"
+)
 
 type PagerTx struct {
 	dbTx *sql.Tx
@@ -31,5 +34,9 @@ func (ptx *PagerTx) FinishTx(err error) error {
 	if err == nil {
 		return ptx.dbTx.Commit()
 	}
+	if err != ErrMigrationAlreadyExist {
+		log.Fatal("failed to run migration, err = ", err)
+	}
+
 	return ptx.dbTx.Rollback()
 }

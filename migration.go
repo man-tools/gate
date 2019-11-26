@@ -56,7 +56,6 @@ type defaultMigrationConfig struct {
 }
 
 type Migration struct {
-	auth       *Auth
 	dialect    string
 	schemaName string
 	config     defaultMigrationConfig
@@ -64,7 +63,6 @@ type Migration struct {
 
 type MigrationOptions struct {
 	DBConnection *sql.DB
-	auth         *Auth
 	dialect      string
 	schema       string
 }
@@ -86,7 +84,6 @@ func NewMigration(opts MigrationOptions) (*Migration, error) {
 		dialect:    opts.dialect,
 		config:     dc,
 		schemaName: opts.schema,
-		auth:       opts.auth,
 	}
 	return m, nil
 }

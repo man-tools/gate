@@ -100,7 +100,6 @@ func (p *pagerBuilder) BuildPager() *Pager {
 	migrator, err := NewMigration(MigrationOptions{
 		dialect: p.pagerOptions.Dialect,
 		schema:  p.pagerOptions.SchemaName,
-		auth:    authModule,
 	})
 	setDatabaseConnection(p.pagerOptions.DbConnection)
 
