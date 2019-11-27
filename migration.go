@@ -20,6 +20,7 @@ const (
 
 var (
 	ErrMigrationAlreadyExist = errors.New("error while running migration, migration already exist")
+	ErrMigrationHistory      = errors.New("error while record migration history")
 )
 
 type RunMigration interface {
@@ -32,12 +33,12 @@ type indexSchema struct {
 }
 
 var existTable = map[string]bool{
-	USER_TABLE:            false,
-	PERMISSION_TABLE:      false,
-	ROLE_TABLE:            false,
-	ROLE_PERMISSION_TABLE: false,
-	USER_ROLE_TABLE:       false,
-	MIGRATION:             false,
+	userTable:           false,
+	permissionTable:     false,
+	roleTable:           false,
+	rolePermissionTable: false,
+	userRoleTable:       false,
+	migrationTable:      false,
 }
 var indexes = map[string]string{
 	"rbac_user_email_idx":                      "CREATE UNIQUE INDEX `rbac_user_email_idx` ON rbac_user(email)",
@@ -170,8 +171,8 @@ func (m *Migration) Run(migration RunMigration) error {
 	}
 	defer ptx.FinishTx(err)
 
-	migrationName := reflect.TypeOf(migration).Name()
-	alreadyRun, err := checkExistMigration(ptx, migrationName)
+	migrationType := reflect.TypeOf(migration)
+	alreadyRun, err := checkExistMigration(ptx, migrationType.Elem().Name())
 	if err != nil {
 		return err
 	}
@@ -181,9 +182,10 @@ func (m *Migration) Run(migration RunMigration) error {
 	}
 	err = migration.Run(ptx)
 	if err != nil {
-		errRecordMigration := insertMigration(ptx, migrationName)
+		errRecordMigration := insertMigration(ptx, migrationType.Elem().Name())
 		if errRecordMigration != nil {
-			return errRecordMigration
+			log.Printf("%s : %s", ErrMigrationHistory.Error(), errRecordMigration)
+			return ErrMigrationHistory
 		}
 	}
 	return err

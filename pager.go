@@ -24,12 +24,12 @@ const (
 
 // Constants for TableName
 const (
-	USER_TABLE            = "rbac_user"
-	PERMISSION_TABLE      = "rbac_permission"
-	ROLE_TABLE            = "rbac_role"
-	ROLE_PERMISSION_TABLE = "rbac_role_permission"
-	USER_ROLE_TABLE       = "rbac_user_role"
-	MIGRATION             = "rbac_migration"
+	userTable           = "rbac_user"
+	permissionTable     = "rbac_permission"
+	roleTable           = "rbac_role"
+	rolePermissionTable = "rbac_role_permission"
+	userRoleTable       = "rbac_user_role"
+	migrationTable      = "rbac_migration"
 )
 
 type Pager struct {
@@ -82,8 +82,8 @@ func (p *pagerBuilder) SetTokenGenerator(generator TokenGenerator) *pagerBuilder
 	return p
 }
 
-func (p *pagerBuilder) SetPasswordStrategy(strategy PasswordGenerator) *pagerBuilder {
-	p.passwordStrategy = strategy
+func (p *pagerBuilder) SetPasswordGenerator(generator PasswordGenerator) *pagerBuilder {
+	p.passwordStrategy = generator
 	return p
 }
 
