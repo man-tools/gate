@@ -18,8 +18,8 @@ const (
 )
 
 const (
-	MYSQL_MIGRATION_PATH        = "mysql_migration.sql"
-	REVERT_MYSQL_MIGRATION_PATH = "mysql_cleanup_migration.sql"
+	mysqlMigrationPath       = "mysql_migration.sql"
+	revertMysqlMigrationPath = "mysql_cleanup_migration.sql"
 )
 
 // Constants for TableName
@@ -27,8 +27,10 @@ const (
 	userTable           = "rbac_user"
 	permissionTable     = "rbac_permission"
 	roleTable           = "rbac_role"
+	groupTable          = "rbac_group"
 	rolePermissionTable = "rbac_role_permission"
 	userRoleTable       = "rbac_user_role"
+	userGroupTable      = "rbac_user_group"
 	migrationTable      = "rbac_migration"
 )
 

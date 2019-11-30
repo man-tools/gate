@@ -25,6 +25,11 @@ func (ptx *PagerTx) Role(role *Role) *Role {
 	return role
 }
 
+func (ptx *PagerTx) Group(group *Group) *Group {
+	group.db = ptx.dbTx
+	return group
+}
+
 func (ptx *PagerTx) Permission(permission *Permission) *Permission {
 	permission.db = ptx.dbTx
 	return permission

@@ -37,7 +37,9 @@ var existTable = map[string]bool{
 	permissionTable:     false,
 	roleTable:           false,
 	rolePermissionTable: false,
+	groupTable:          false,
 	userRoleTable:       false,
+	userGroupTable:      false,
 	migrationTable:      false,
 }
 var indexes = map[string]string{
@@ -46,6 +48,7 @@ var indexes = map[string]string{
 	"rbac_permission_route_method_idx":         "CREATE UNIQUE INDEX `rbac_permission_route_method_idx` ON rbac_permission(route, method)",
 	"rbac_permission_name_idx":                 "CREATE UNIQUE INDEX `rbac_permission_name_idx` ON rbac_permission(name)",
 	"rbac_role_name_idx":                       "CREATE UNIQUE INDEX `rbac_role_name_idx` ON rbac_role(name)",
+	"rbac_group_name_idx":                      "CREATE UNIQUE INDEX `rbac_group_name_idx` ON rbac_group(name)",
 	"rbac_user_role_role_user_idx":             "CREATE UNIQUE INDEX `rbac_user_role_role_user_idx` on rbac_user_role (role_id, user_id)",
 	"rbac_role_permission_role_permission_idx": "CREATE UNIQUE INDEX `rbac_role_permission_role_permission_idx` on rbac_role_permission (role_id, permission_id)",
 	"rbac_migration_key_idx":                   "CREATE UNIQUE INDEX `rbac_migration_key_idx` on rbac_migration (migration_key)",
@@ -70,8 +73,8 @@ type MigrationOptions struct {
 
 var queryCollection = map[string]defaultMigrationConfig{
 	MYSQLDialect: {
-		migrationPath:       MYSQL_MIGRATION_PATH,
-		revertMigrationPath: REVERT_MYSQL_MIGRATION_PATH,
+		migrationPath:       mysqlMigrationPath,
+		revertMigrationPath: revertMysqlMigrationPath,
 	},
 }
 
@@ -90,7 +93,7 @@ func NewMigration(opts MigrationOptions) (*Migration, error) {
 }
 
 func (m *Migration) InitDBMigration() error {
-	rawMigrationQuery, err := openMigration(fmt.Sprintf("%s/migration/%s", getCurrentPath(), MYSQL_MIGRATION_PATH))
+	rawMigrationQuery, err := openMigration(fmt.Sprintf("%s/migration/%s", getCurrentPath(), mysqlMigrationPath))
 	if err != nil {
 		return errors.New(fmt.Sprintf(ErrMigration, "failed to open migration file"))
 	}
@@ -118,7 +121,7 @@ func (m *Migration) InitDBMigration() error {
 
 func (m *Migration) ClearMigration() {
 	fmt.Println("clear rbac-db")
-	rawMigrationQuery, _ := openMigration(fmt.Sprintf("%s/migration/%s", getCurrentPath(), REVERT_MYSQL_MIGRATION_PATH))
+	rawMigrationQuery, _ := openMigration(fmt.Sprintf("%s/migration/%s", getCurrentPath(), revertMysqlMigrationPath))
 
 	sliceQuery := strings.Split(rawMigrationQuery, delimiterMigration)
 	for i := range sliceQuery {
